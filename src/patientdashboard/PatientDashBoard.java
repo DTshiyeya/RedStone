@@ -4,6 +4,8 @@
  */
 package patientdashboard;
 
+import util.DatabaseConnection;
+
 /**
  *
  * @author bompe
