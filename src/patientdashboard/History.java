@@ -10,11 +10,15 @@ package patientdashboard;
  */
 public class History extends javax.swing.JFrame {
 
+    private int patientId;
+    private String username;
     /**
      * Creates new form History
      */
-    public History() {
+    public History(int patientId, String username) {
         initComponents();
+        this.patientId = patientId;
+        this.username = username;
     }
 
     /**

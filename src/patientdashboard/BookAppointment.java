@@ -4,17 +4,239 @@
  */
 package patientdashboard;
 
+import com.toedter.calendar.JDateChooser;
+import util.DatabaseConnection;
+
+import javax.swing.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.sql.*;
+import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 /**
  *
  * @author bompe
  */
 public class BookAppointment extends javax.swing.JFrame {
 
+    private int patientId;
+    private String username;
+    
+    // Static map of doctors by department (easy to extend)
+    private static final Map<String, List<String>> DOCTORS_BY_DEPT = new LinkedHashMap<>();
+    static {
+        DOCTORS_BY_DEPT.put("Cardiology", Arrays.asList("Dr. A. Heart", "Dr. B. Pulse"));
+        DOCTORS_BY_DEPT.put("Neurology", Arrays.asList("Dr. N. Brain", "Dr. C. Nerve"));
+        DOCTORS_BY_DEPT.put("Pediatrics", Arrays.asList("Dr. P. Child", "Dr. K. Kids"));
+        DOCTORS_BY_DEPT.put("Orthopedics", Arrays.asList("Dr. O. Bone", "Dr. S. Joint"));
+        DOCTORS_BY_DEPT.put("Ophthalmology", Arrays.asList("Dr. V. Eye", "Dr. L. Sight"));
+        DOCTORS_BY_DEPT.put("Dentistry", Arrays.asList("Dr. T. Tooth", "Dr. M. Smile"));
+    }
+
+    // Standard time slots (30-minute increments) - adjust as needed
+    private static final List<String> ALL_TIME_SLOTS = Arrays.asList(
+            "08:00","08:30","09:00","09:30","10:00","10:30",
+            "11:00","11:30","12:00","12:30","13:00","13:30",
+            "14:00","14:30","15:00","15:30","16:00"
+    );
+
     /**
      * Creates new form BookAppointment
      */
-    public BookAppointment() {
+    public BookAppointment(int patientId, String username) {
+        this.patientId = patientId;
+        this.username = username;
         initComponents();
+        postInit();
+    }
+    
+    // Common post-initialization
+    private void postInit() {
+        populateDepartments();
+        setupListeners();
+        // Close behavior: go back to dashboard if window closed (optional)
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                // optional: return to patient dashboard
+                // patientsDash dash = new patientsDash(patientId, username);
+                // dash.setVisible(true);
+            }
+        });
+    }
+
+    // Populate departments combo box
+    private void populateDepartments() {
+        cmbDepartment.removeAllItems();
+        cmbDepartment.addItem("Select Department");
+        for (String d : DOCTORS_BY_DEPT.keySet()) {
+            cmbDepartment.addItem(d);
+        }
+    }
+
+    private void setupListeners() {
+        cmbDepartment.addActionListener(e -> {
+            String dept = (String) cmbDepartment.getSelectedItem();
+            if (dept != null && DOCTORS_BY_DEPT.containsKey(dept)) {
+                populateDoctors(dept);
+            } else {
+                cmbDoctor.removeAllItems();
+                cmbDoctor.addItem("Select Doctor");
+            }
+            lblStatus.setText("");
+        });
+
+        // When doctor or date changes -> refresh times
+        cmbDoctor.addActionListener(e -> refreshAvailableTimes());
+        jDateChooser1.addPropertyChangeListener("date", evt -> refreshAvailableTimes());
+
+        btnBook.addActionListener(e -> handleBookAction());
+        btnBack.addActionListener(e -> {
+            // Return to patientsDash
+            patientsDash dash = new patientsDash(patientId, username);
+            dash.setVisible(true);
+            this.dispose();
+        });
+    }
+
+    private void populateDoctors(String department) {
+        cmbDoctor.removeAllItems();
+        cmbDoctor.addItem("Select Doctor");
+        List<String> docs = DOCTORS_BY_DEPT.getOrDefault(department, Collections.emptyList());
+        for (String d : docs) cmbDoctor.addItem(d);
+    }
+
+    // Refresh times by removing already-booked slots for selected doctor & date
+    private void refreshAvailableTimes() {
+        lblStatus.setText("");
+        cmbTime.removeAllItems();
+        cmbTime.addItem("Select Time");
+
+        String doctor = (String) cmbDoctor.getSelectedItem();
+        java.util.Date selectedDate = jDateChooser1.getDate();
+
+        if (doctor == null || doctor.equals("Select Doctor") || selectedDate == null) {
+            return;
+        }
+
+        // Format date for SQL
+        Date sqlDate = new Date(selectedDate.getTime());
+
+        // Get booked times from DB
+        Set<String> booked = new HashSet<>();
+        String sql = "SELECT appointmentTime FROM appointments WHERE doctor = ? AND appointmentDate = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pst = conn.prepareStatement(sql)) {
+
+            pst.setString(1, doctor);
+            pst.setDate(2, new java.sql.Date(sqlDate.getTime()));
+            try (ResultSet rs = pst.executeQuery()) {
+                while (rs.next()) {
+                    booked.add(rs.getString("appointmentTime"));
+                }
+            }
+        } catch (Exception ex) {
+            lblStatus.setText("Error loading booked times: " + ex.getMessage());
+            return;
+        }
+
+        // Fill remaining time slots
+        for (String slot : ALL_TIME_SLOTS) {
+            if (!booked.contains(slot)) {
+                cmbTime.addItem(slot);
+            }
+        }
+    }
+
+    // Validate inputs before booking
+    private boolean validateAppointmentForm() {
+        boolean ok = true;
+        lblDeptError.setText("");
+        lblDoctorError.setText("");
+        lblTimeError.setText("");
+        lblTimeError.setText("");
+        lblReasonError.setText("");
+        lblStatus.setText("");
+
+        if (cmbDepartment.getSelectedIndex() <= 0) {
+            lblDeptError.setText("Choose department");
+            ok = false;
+        }
+        if (cmbDoctor.getSelectedIndex() <= 0) {
+            lblDoctorError.setText("Choose doctor");
+            ok = false;
+        }
+        if (jDateChooser1.getDate() == null) {
+            lblTimeError.setText("Select date");
+            ok = false;
+        } else {
+            // no past dates
+            LocalDate chosen = jDateChooser1.getDate().toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+            if (chosen.isBefore(LocalDate.now())) {
+                lblTimeError.setText("Cannot choose past date");
+                ok = false;
+            }
+        }
+        if (cmbTime.getSelectedIndex() <= 0) {
+            lblTimeError.setText("Choose time");
+            ok = false;
+        }
+        if (txtReason.getText().trim().isEmpty()) {
+            lblReasonError.setText("Please describe reason");
+            ok = false;
+        }
+        return ok;
+    }
+
+    // Booking action: insert appointment and show success
+    private void handleBookAction() {
+        if (!validateAppointmentForm()) return;
+
+        String department = (String) cmbDepartment.getSelectedItem();
+        String doctor = (String) cmbDoctor.getSelectedItem();
+        String time = (String) cmbTime.getSelectedItem();
+        java.util.Date date = jDateChooser1.getDate();
+        String reason = txtReason.getText().trim();
+
+        String sql = "INSERT INTO appointments (patientId, department, doctor, appointmentDate, appointmentTime, reason) "
+                + "VALUES (?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pst = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+
+            pst.setInt(1, patientId);
+            pst.setString(2, department);
+            pst.setString(3, doctor);
+            pst.setDate(4, new java.sql.Date(date.getTime())); // appointmentDate
+            pst.setString(5, time); // appointmentTime as HH:mm string
+            pst.setString(6, reason);
+
+            pst.executeUpdate();
+
+            // get generated appointment id if needed
+            try (ResultSet gen = pst.getGeneratedKeys()) {
+                if (gen.next()) {
+                    int appointmentId = gen.getInt(1);
+                    // student-style: we can print or use this id
+                    System.out.println("New appointmentId = " + appointmentId);
+                }
+            }
+
+            JOptionPane.showMessageDialog(this, "Appointment booked successfully!");
+            // go back to dashboard or clear form
+            patientsDash dash = new patientsDash(patientId, username);
+            dash.setVisible(true);
+            this.dispose();
+
+        } catch (SQLIntegrityConstraintViolationException dup) {
+            lblStatus.setText("Duplicate appointment or constraint error.");
+        } catch (Exception ex) {
+            lblStatus.setText("Booking error: " + ex.getMessage());
+        }
     }
 
     /**
@@ -31,19 +253,24 @@ public class BookAppointment extends javax.swing.JFrame {
         jPanel2 = new javax.swing.JPanel();
         jLabel8 = new javax.swing.JLabel();
         NavBtnEdit = new javax.swing.JButton();
-        NavBtnBack2Dash = new javax.swing.JButton();
+        btnBack = new javax.swing.JButton();
         jLabel1 = new javax.swing.JLabel();
         jLabel2 = new javax.swing.JLabel();
         jLabel3 = new javax.swing.JLabel();
         jLabel4 = new javax.swing.JLabel();
         jLabel5 = new javax.swing.JLabel();
-        jTextField5 = new javax.swing.JTextField();
-        jComboBox1 = new javax.swing.JComboBox<>();
-        jComboBox2 = new javax.swing.JComboBox<>();
-        jComboBox4 = new javax.swing.JComboBox<>();
+        txtReason = new javax.swing.JTextField();
+        cmbDepartment = new javax.swing.JComboBox<>();
+        cmbDoctor = new javax.swing.JComboBox<>();
+        cmbTime = new javax.swing.JComboBox<>();
         jDateChooser2 = new com.toedter.calendar.JDateChooser();
         jLabel6 = new javax.swing.JLabel();
-        jButton1 = new javax.swing.JButton();
+        btnBook = new javax.swing.JButton();
+        lblStatus = new javax.swing.JLabel();
+        lblDeptError = new javax.swing.JLabel();
+        lblDoctorError = new javax.swing.JLabel();
+        lblTimeError = new javax.swing.JLabel();
+        lblReasonError = new javax.swing.JLabel();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setResizable(false);
@@ -69,14 +296,14 @@ public class BookAppointment extends javax.swing.JFrame {
             }
         });
 
-        NavBtnBack2Dash.setBackground(new java.awt.Color(0, 121, 151));
-        NavBtnBack2Dash.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
-        NavBtnBack2Dash.setForeground(new java.awt.Color(255, 255, 255));
-        NavBtnBack2Dash.setText("Back to Dashboard");
-        NavBtnBack2Dash.setBorder(null);
-        NavBtnBack2Dash.addActionListener(new java.awt.event.ActionListener() {
+        btnBack.setBackground(new java.awt.Color(0, 121, 151));
+        btnBack.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
+        btnBack.setForeground(new java.awt.Color(255, 255, 255));
+        btnBack.setText("Back to Dashboard");
+        btnBack.setBorder(null);
+        btnBack.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                NavBtnBack2DashActionPerformed(evt);
+                btnBackActionPerformed(evt);
             }
         });
 
@@ -91,7 +318,7 @@ public class BookAppointment extends javax.swing.JFrame {
             .addGroup(jPanel2Layout.createSequentialGroup()
                 .addGap(61, 61, 61)
                 .addGroup(jPanel2Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(NavBtnBack2Dash)
+                    .addComponent(btnBack)
                     .addComponent(NavBtnEdit))
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
         );
@@ -101,7 +328,7 @@ public class BookAppointment extends javax.swing.JFrame {
                 .addContainerGap()
                 .addComponent(jLabel8)
                 .addGap(36, 36, 36)
-                .addComponent(NavBtnBack2Dash)
+                .addComponent(btnBack)
                 .addGap(18, 18, 18)
                 .addComponent(NavBtnEdit)
                 .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
@@ -122,35 +349,45 @@ public class BookAppointment extends javax.swing.JFrame {
         jLabel5.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
         jLabel5.setText("Reason");
 
-        jTextField5.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
+        txtReason.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
 
-        jComboBox1.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Cardiology", "Neurology", "Pediatrics", "Orthopedics", "Ophthalmology", "Dentistry", " " }));
-        jComboBox1.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
-        jComboBox1.addActionListener(new java.awt.event.ActionListener() {
+        cmbDepartment.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Cardiology", "Neurology", "Pediatrics", "Orthopedics", "Ophthalmology", "Dentistry", " " }));
+        cmbDepartment.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
+        cmbDepartment.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jComboBox1ActionPerformed(evt);
+                cmbDepartmentActionPerformed(evt);
             }
         });
 
-        jComboBox2.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
-        jComboBox2.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
+        cmbDoctor.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Item 1", "Item 2", "Item 3", "Item 4" }));
+        cmbDoctor.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
 
-        jComboBox4.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00" }));
-        jComboBox4.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
+        cmbTime.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00" }));
+        cmbTime.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 153, 153), 2, true));
 
         jLabel6.setFont(new java.awt.Font("Segoe UI", 0, 18)); // NOI18N
         jLabel6.setText("Appointments");
 
-        jButton1.setBackground(new java.awt.Color(92, 184, 92));
-        jButton1.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
-        jButton1.setForeground(new java.awt.Color(255, 255, 255));
-        jButton1.setText("Submit");
-        jButton1.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(92, 184, 92), 2, true));
-        jButton1.addActionListener(new java.awt.event.ActionListener() {
+        btnBook.setBackground(new java.awt.Color(92, 184, 92));
+        btnBook.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
+        btnBook.setForeground(new java.awt.Color(255, 255, 255));
+        btnBook.setText("Submit");
+        btnBook.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(92, 184, 92), 2, true));
+        btnBook.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jButton1ActionPerformed(evt);
+                btnBookActionPerformed(evt);
             }
         });
+
+        lblStatus.setText("jLabel7");
+
+        lblDeptError.setText("jLabel7");
+
+        lblDoctorError.setText("jLabel7");
+
+        lblTimeError.setText("jLabel7");
+
+        lblReasonError.setText("jLabel7");
 
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
         jPanel1.setLayout(jPanel1Layout);
@@ -161,37 +398,47 @@ public class BookAppointment extends javax.swing.JFrame {
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
                         .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                        .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 332, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addComponent(btnBook, javax.swing.GroupLayout.PREFERRED_SIZE, 332, javax.swing.GroupLayout.PREFERRED_SIZE)
                         .addGap(181, 181, 181))
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                            .addGroup(jPanel1Layout.createSequentialGroup()
-                                .addGap(24, 24, 24)
-                                .addComponent(jLabel6))
-                            .addGroup(jPanel1Layout.createSequentialGroup()
-                                .addGap(40, 40, 40)
-                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                .addGroup(jPanel1Layout.createSequentialGroup()
+                                    .addGap(24, 24, 24)
+                                    .addComponent(jLabel6))
+                                .addGroup(jPanel1Layout.createSequentialGroup()
+                                    .addGap(40, 40, 40)
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                            .addComponent(txtReason, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 594, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                                .addComponent(jLabel5)
+                                                .addGap(295, 295, 295)
+                                                .addComponent(lblTimeError)))
+                                        .addGroup(jPanel1Layout.createSequentialGroup()
+                                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                                .addComponent(jDateChooser2, javax.swing.GroupLayout.PREFERRED_SIZE, 253, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                                .addComponent(jLabel3)
+                                                .addComponent(lblDeptError))
+                                            .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                                .addComponent(jLabel4)
+                                                .addComponent(cmbTime, javax.swing.GroupLayout.PREFERRED_SIZE, 279, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                                        .addComponent(lblReasonError, javax.swing.GroupLayout.Alignment.LEADING)))
+                                .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                                    .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
                                     .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                        .addComponent(jLabel5)
-                                        .addComponent(jTextField5, javax.swing.GroupLayout.PREFERRED_SIZE, 594, javax.swing.GroupLayout.PREFERRED_SIZE))
-                                    .addGroup(jPanel1Layout.createSequentialGroup()
-                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                            .addComponent(jDateChooser2, javax.swing.GroupLayout.PREFERRED_SIZE, 253, javax.swing.GroupLayout.PREFERRED_SIZE)
-                                            .addComponent(jLabel3))
-                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                            .addComponent(jLabel4)
-                                            .addComponent(jComboBox4, javax.swing.GroupLayout.PREFERRED_SIZE, 279, javax.swing.GroupLayout.PREFERRED_SIZE)))))
-                            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addGroup(jPanel1Layout.createSequentialGroup()
-                                        .addComponent(jLabel1)
-                                        .addGap(204, 204, 204)
-                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                            .addComponent(jLabel2)
-                                            .addComponent(jComboBox2, javax.swing.GroupLayout.PREFERRED_SIZE, 279, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                                    .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, 255, javax.swing.GroupLayout.PREFERRED_SIZE))))
+                                        .addGroup(jPanel1Layout.createSequentialGroup()
+                                            .addComponent(jLabel1)
+                                            .addGap(204, 204, 204)
+                                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                                .addComponent(jLabel2)
+                                                .addComponent(cmbDoctor, javax.swing.GroupLayout.PREFERRED_SIZE, 279, javax.swing.GroupLayout.PREFERRED_SIZE)
+                                                .addComponent(lblDoctorError)))
+                                        .addComponent(cmbDepartment, javax.swing.GroupLayout.PREFERRED_SIZE, 255, javax.swing.GroupLayout.PREFERRED_SIZE))))
+                            .addGroup(jPanel1Layout.createSequentialGroup()
+                                .addGap(339, 339, 339)
+                                .addComponent(lblStatus)))
                         .addContainerGap(83, Short.MAX_VALUE))))
         );
         jPanel1Layout.setVerticalGroup(
@@ -205,23 +452,33 @@ public class BookAppointment extends javax.swing.JFrame {
                     .addComponent(jLabel2))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jComboBox2, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jComboBox1, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(18, 18, 18)
+                    .addComponent(cmbDoctor, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(cmbDepartment, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(lblDeptError)
+                    .addComponent(lblDoctorError))
+                .addGap(3, 3, 3)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(jLabel4)
                     .addComponent(jLabel3))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(jComboBox4, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(jDateChooser2, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 39, Short.MAX_VALUE)
-                .addComponent(jLabel5)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
-                .addComponent(jTextField5, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(71, 71, 71)
-                .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addGap(82, 82, 82))
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(cmbTime, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(jDateChooser2, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 40, Short.MAX_VALUE)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel5)
+                    .addComponent(lblTimeError))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(txtReason, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(lblReasonError)
+                .addGap(49, 49, 49)
+                .addComponent(btnBook, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(lblStatus)
+                .addGap(54, 54, 54))
             .addComponent(jPanel2, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
         );
 
@@ -244,25 +501,23 @@ public class BookAppointment extends javax.swing.JFrame {
         setLocationRelativeTo(null);
     }// </editor-fold>//GEN-END:initComponents
 
-    private void jComboBox1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jComboBox1ActionPerformed
+    private void cmbDepartmentActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbDepartmentActionPerformed
         // TODO add your handling code here:
-    }//GEN-LAST:event_jComboBox1ActionPerformed
+    }//GEN-LAST:event_cmbDepartmentActionPerformed
 
-    private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
+    private void btnBookActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnBookActionPerformed
         // TODO add your handling code here:
-    }//GEN-LAST:event_jButton1ActionPerformed
+    }//GEN-LAST:event_btnBookActionPerformed
 
     private void NavBtnEditActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnEditActionPerformed
         // TODO add your handling code here:
-        new Edit().setVisible(true);
-        dispose();
+        
     }//GEN-LAST:event_NavBtnEditActionPerformed
 
-    private void NavBtnBack2DashActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBack2DashActionPerformed
+    private void btnBackActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnBackActionPerformed
         // TODO add your handling code here:
-        new patientsDash().setVisible(true);
-        dispose();
-    }//GEN-LAST:event_NavBtnBack2DashActionPerformed
+        
+    }//GEN-LAST:event_btnBackActionPerformed
 
     /**
      * @param args the command line arguments
@@ -300,12 +555,12 @@ public class BookAppointment extends javax.swing.JFrame {
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
-    private javax.swing.JButton NavBtnBack2Dash;
     private javax.swing.JButton NavBtnEdit;
-    private javax.swing.JButton jButton1;
-    private javax.swing.JComboBox<String> jComboBox1;
-    private javax.swing.JComboBox<String> jComboBox2;
-    private javax.swing.JComboBox<String> jComboBox4;
+    private javax.swing.JButton btnBack;
+    private javax.swing.JButton btnBook;
+    private javax.swing.JComboBox<String> cmbDepartment;
+    private javax.swing.JComboBox<String> cmbDoctor;
+    private javax.swing.JComboBox<String> cmbTime;
     private com.toedter.calendar.JDateChooser jDateChooser1;
     private com.toedter.calendar.JDateChooser jDateChooser2;
     private javax.swing.JLabel jLabel1;
@@ -317,6 +572,11 @@ public class BookAppointment extends javax.swing.JFrame {
     private javax.swing.JLabel jLabel8;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
-    private javax.swing.JTextField jTextField5;
+    private javax.swing.JLabel lblDeptError;
+    private javax.swing.JLabel lblDoctorError;
+    private javax.swing.JLabel lblReasonError;
+    private javax.swing.JLabel lblStatus;
+    private javax.swing.JLabel lblTimeError;
+    private javax.swing.JTextField txtReason;
     // End of variables declaration//GEN-END:variables
 }

@@ -10,11 +10,17 @@ package patientdashboard;
  */
 public class Cancel extends javax.swing.JFrame {
 
+    private int patientId;
+    private String username;
     /**
      * Creates new form Cancel
      */
-    public Cancel() {
+    public Cancel(int patientId, String username) {
         initComponents();
+        this.patientId = patientId;
+        this.username = username;
+        
+        
     }
 
     /**
@@ -197,7 +203,7 @@ public class Cancel extends javax.swing.JFrame {
 
     private void NavBtnBack2DashActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBack2DashActionPerformed
         // TODO add your handling code here:
-        new patientsDash().setVisible(true);
+        new patientsDash(patientId, username).setVisible(true);
         dispose();
     }//GEN-LAST:event_NavBtnBack2DashActionPerformed
 

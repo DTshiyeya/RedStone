@@ -10,11 +10,15 @@ package patientdashboard;
  */
 public class Edit extends javax.swing.JFrame {
 
+    private int patientId;
+    private String username;
     /**
      * Creates new form Edit
      */
-    public Edit() {
+    public Edit(int patientId, String username) {
         initComponents();
+        this.patientId = patientId;
+        this.username = username;
     }
 
     /**
@@ -77,7 +81,7 @@ public class Edit extends javax.swing.JFrame {
 
         NavBtnEdit.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
         NavBtnEdit.setForeground(new java.awt.Color(255, 255, 255));
-        NavBtnEdit.setText("Edit Profile");
+        NavBtnEdit.setText("Exit");
         NavBtnEdit.setBorder(null);
         NavBtnEdit.setBorderPainted(false);
         NavBtnEdit.setContentAreaFilled(false);
@@ -305,14 +309,13 @@ public class Edit extends javax.swing.JFrame {
 
     private void NavBtnBack2DashActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBack2DashActionPerformed
         // TODO add your handling code here:
-        new patientsDash().setVisible(true);
+        new patientsDash(patientId, username).setVisible(true);
         dispose();
     }//GEN-LAST:event_NavBtnBack2DashActionPerformed
 
     private void NavBtnEditActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnEditActionPerformed
         // TODO add your handling code here:
-        new Edit().setVisible(true);
-        dispose();
+        
     }//GEN-LAST:event_NavBtnEditActionPerformed
 
     /**
@@ -345,7 +348,7 @@ public class Edit extends javax.swing.JFrame {
         /* Create and display the form */
         java.awt.EventQueue.invokeLater(new Runnable() {
             public void run() {
-                new Edit().setVisible(true);
+                new Edit(patientId, username).setVisible(true);
             }
         });
     }

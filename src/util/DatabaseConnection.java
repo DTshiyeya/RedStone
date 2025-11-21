@@ -13,7 +13,7 @@ import java.sql.SQLException;
  * @author tshiy
  */
 public class DatabaseConnection {
-    private static final String URL = "jdbc:mysql://localhost:3306/clinic_system";
+    private static final String URL = "jdbc:mysql://localhost:3306/redstone";
     private static final String USER = "root";
     private static final String PASSWORD = ""; // your MySQL password if set
 

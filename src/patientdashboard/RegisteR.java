@@ -4,18 +4,215 @@
  */
 package patientdashboard;
 
+import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import java.sql.*;
+import java.time.LocalDate;
+import java.time.Period;
+import java.time.ZoneId;
+import java.sql.DriverManager;
+
+
+
 /**
  *
  * @author bompe
  */
 public class RegisteR extends javax.swing.JFrame {
-
     /**
      * Creates new form RegisteR
      */
     public RegisteR() {
         initComponents();
+        addRealtimeValidation();
+        setupDOBListener();
     }
+    
+    // ------------------------------
+    // REALTIME VALIDATION
+    // ------------------------------
+    private void addRealtimeValidation() {
+
+        txtUsername.getDocument().addDocumentListener(new SimpleDocumentListener() {
+            @Override public void update() { validateUsername(); }
+        });
+
+        txtPassword.getDocument().addDocumentListener(new SimpleDocumentListener() {
+            @Override public void update() { validatePassword(); }
+        });
+
+        txtConfirmPassword.getDocument().addDocumentListener(new SimpleDocumentListener() {
+            @Override public void update() { validateConfirmPassword(); }
+        });
+
+        txtEmail.getDocument().addDocumentListener(new SimpleDocumentListener() {
+            @Override public void update() { validateEmail(); }
+        });
+
+        txtPhoneNumber.getDocument().addDocumentListener(new SimpleDocumentListener() {
+            @Override public void update() { validatePhone(); }
+        });
+
+        txtIDNumber.getDocument().addDocumentListener(new SimpleDocumentListener() {
+            @Override public void update() { validateID(); }
+        });
+    }
+
+    // ------------------------------
+    // AUTO CALCULATE AGE FROM DOB
+    // ------------------------------
+    private void setupDOBListener() {
+        dateChooserDOB.addPropertyChangeListener("date", evt -> calculateAgeFromDOB());
+    }
+
+    private int calculateAgeFromDOB() {
+        if (dateChooserDOB.getDate() == null) {
+            return -1;
+        }
+
+        java.util.Date dob = dateChooserDOB.getDate();
+        LocalDate birthDate = dob.toInstant()
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate();
+
+        return Period.between(birthDate, LocalDate.now()).getYears();
+    }
+
+
+    // ------------------------------
+    // VALIDATION RULES
+    // ------------------------------
+    private boolean validateUsername() {
+        if (txtUsername.getText().trim().isEmpty()) {
+            lblUsernameError.setText("Username required");
+            return false;
+        }
+        lblUsernameError.setText("");
+        return true;
+    }
+
+    private boolean validatePassword() {
+        if (txtPassword.getText().trim().length() < 6) {
+            lblPasswordError.setText("Min 6 characters");
+            return false;
+        }
+        lblPasswordError.setText("");
+        return true;
+    }
+
+    private boolean validateConfirmPassword() {
+        if (!txtPassword.getText().equals(txtConfirmPassword.getText())) {
+            lblConfirmError.setText("Passwords do not match");
+            return false;
+        }
+        lblConfirmError.setText("");
+        return true;
+    }
+
+    private boolean validateEmail() {
+        if (!txtEmail.getText().trim().matches("^[A-Za-z0-9+_.-]+@(.+)$")) {
+            lblEmailError.setText("Invalid email");
+            return false;
+        }
+        lblEmailError.setText("");
+        return true;
+    }
+
+    private boolean validatePhone() {
+        if (!txtPhoneNumber.getText().trim().matches("\\d{10,13}")) {
+            lblPhoneError.setText("Invalid phone");
+            return false;
+        }
+        lblPhoneError.setText("");
+        return true;
+    }
+
+    private boolean validateID() {
+        if (txtIDNumber.getText().trim().length() < 6) {
+            lblIDError.setText("Invalid ID");
+            return false;
+        }
+        lblIDError.setText("");
+        return true;
+    }
+
+
+    // ------------------------------
+    // SUBMIT BUTTON — SAVE TO MYSQL
+    // ------------------------------
+    private void registerUser() {
+        if (!validateUsername() || !validatePassword() || !validateConfirmPassword()
+                || !validateEmail() || !validatePhone() || !validateID()) {
+            lblStatus.setText("Fix errors before submitting");
+            return;
+        }
+
+        if (dateChooserDOB.getDate() == null) {
+            lblStatus.setText("Select a valid Date of Birth");
+            return;
+        }
+
+        int age = calculateAgeFromDOB();
+        if (age < 0 || age > 120) {
+            lblStatus.setText("Invalid Date of Birth");
+            return;
+        }
+
+        String sql = "INSERT INTO patients "
+                + "(username, password, firstName, lastName, gender, age, email, phone, dateOfBirth, idNumber) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = DriverManager.getConnection(
+                "jdbc:mysql://localhost:3306/redstone", "root", "");
+             PreparedStatement pst = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+
+            pst.setString(1, txtUsername.getText());
+            pst.setString(2, txtPassword.getText());
+            pst.setString(3, txtFirstName.getText());
+            pst.setString(4, txtLastName.getText());
+            pst.setString(5, cmbGender.getSelectedItem().toString());
+            pst.setInt(6, age);
+            pst.setString(7, txtEmail.getText());
+            pst.setString(8, txtPhoneNumber.getText());
+
+            java.util.Date dob = dateChooserDOB.getDate();
+            pst.setDate(9, new java.sql.Date(dob.getTime()));
+
+            pst.setString(10, txtIDNumber.getText());
+
+            pst.executeUpdate();
+
+            // Get auto-generated patient ID
+            ResultSet rs = pst.getGeneratedKeys();
+            int newId = -1;
+            if (rs.next()) {
+                newId = rs.getInt(1);
+            }
+
+            lblStatus.setText("Registered Successfully!");
+
+            // OPEN patient dashboard
+            patientsDash dash = new patientsDash(newId, txtUsername.getText());
+            dash.setVisible(true);
+            this.dispose();
+
+        } catch (Exception e) {
+            lblStatus.setText("Error: " + e.getMessage());
+        }
+    }
+
+    
+    // ------------------------------
+    // Simple Listener Class
+    // ------------------------------
+    private interface SimpleDocumentListener extends DocumentListener {
+        void update();
+        @Override default void insertUpdate(DocumentEvent e) { update(); }
+        @Override default void removeUpdate(DocumentEvent e) { update(); }
+        @Override default void changedUpdate(DocumentEvent e) { update(); }
+    }
+
 
     /**
      * This method is called from within the constructor to initialize the form.
@@ -39,17 +236,29 @@ public class RegisteR extends javax.swing.JFrame {
         jLabel7 = new javax.swing.JLabel();
         txtPhoneNumber = new javax.swing.JTextField();
         jLabel8 = new javax.swing.JLabel();
-        DateChooser = new com.toedter.calendar.JDateChooser();
+        dateChooserDOB = new com.toedter.calendar.JDateChooser();
         jLabel9 = new javax.swing.JLabel();
         txtIDNumber = new javax.swing.JTextField();
         jLabel10 = new javax.swing.JLabel();
-        jCheckBox1 = new javax.swing.JCheckBox();
-        jCheckBox2 = new javax.swing.JCheckBox();
         jLabel11 = new javax.swing.JLabel();
         txtPassword = new javax.swing.JTextField();
         txtUsername = new javax.swing.JTextField();
         jLabel12 = new javax.swing.JLabel();
         jButton1 = new javax.swing.JButton();
+        cmbGender = new javax.swing.JComboBox<>();
+        lblFirstNameError = new javax.swing.JLabel();
+        lblLastNameError = new javax.swing.JLabel();
+        lblEmailError = new javax.swing.JLabel();
+        lblDOBError = new javax.swing.JLabel();
+        lblPhoneError = new javax.swing.JLabel();
+        lblIDError = new javax.swing.JLabel();
+        lbl = new javax.swing.JLabel();
+        lblUsernameError = new javax.swing.JLabel();
+        jLabel21 = new javax.swing.JLabel();
+        txtConfirmPassword = new javax.swing.JTextField();
+        lblPasswordError = new javax.swing.JLabel();
+        lblConfirmError = new javax.swing.JLabel();
+        lblStatus = new javax.swing.JLabel();
 
         setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
         setResizable(false);
@@ -59,9 +268,9 @@ public class RegisteR extends javax.swing.JFrame {
         jPanel2.setLayout(new org.netbeans.lib.awtextra.AbsoluteLayout());
 
         jLabel1.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/1762982264048.jpg"))); // NOI18N
-        jPanel2.add(jLabel1, new org.netbeans.lib.awtextra.AbsoluteConstraints(0, 0, 500, -1));
+        jPanel2.add(jLabel1, new org.netbeans.lib.awtextra.AbsoluteConstraints(0, 0, 500, 600));
 
-        jLabel2.setFont(new java.awt.Font("Segoe UI", 1, 24)); // NOI18N
+        jLabel2.setFont(new java.awt.Font("Mongolian Baiti", 1, 36)); // NOI18N
         jLabel2.setText("Sign Up");
 
         jLabel3.setText("First Name:");
@@ -87,25 +296,13 @@ public class RegisteR extends javax.swing.JFrame {
 
         jLabel8.setText("Date Of Birth:");
 
-        DateChooser.setBackground(new java.awt.Color(204, 153, 255));
+        dateChooserDOB.setBackground(new java.awt.Color(0, 121, 151));
 
         jLabel9.setText("ID / Passport number:");
 
         txtIDNumber.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 121, 151), 2, true));
 
         jLabel10.setText("Gender:");
-
-        jCheckBox1.setBackground(new java.awt.Color(0, 121, 151));
-        jCheckBox1.setText("Male");
-        jCheckBox1.setContentAreaFilled(false);
-
-        jCheckBox2.setText("Female");
-        jCheckBox2.setContentAreaFilled(false);
-        jCheckBox2.addActionListener(new java.awt.event.ActionListener() {
-            public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jCheckBox2ActionPerformed(evt);
-            }
-        });
 
         jLabel11.setText("Username:");
 
@@ -130,6 +327,35 @@ public class RegisteR extends javax.swing.JFrame {
             }
         });
 
+        cmbGender.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "Male", "Female" }));
+        cmbGender.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 121, 151), 2, true));
+
+        lblFirstNameError.setText("Password:");
+
+        lblLastNameError.setText("Password:");
+
+        lblEmailError.setText("Password:");
+
+        lblDOBError.setText("Password:");
+
+        lblPhoneError.setText("Password:");
+
+        lblIDError.setText("Password:");
+
+        lbl.setText("Password:");
+
+        lblUsernameError.setText("Password:");
+
+        jLabel21.setText("Confirm Password");
+
+        txtConfirmPassword.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 121, 151), 2, true));
+
+        lblPasswordError.setText("Password:");
+
+        lblConfirmError.setText("Password:");
+
+        lblStatus.setText("jLabel6");
+
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
         jPanel1.setLayout(jPanel1Layout);
         jPanel1Layout.setHorizontalGroup(
@@ -138,71 +364,99 @@ public class RegisteR extends javax.swing.JFrame {
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                     .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(168, 168, 168)
-                        .addComponent(jLabel2)
-                        .addGap(0, 0, Short.MAX_VALUE))
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
                         .addGap(29, 29, 29)
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addGroup(jPanel1Layout.createSequentialGroup()
-                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
-                                    .addComponent(txtUsername, javax.swing.GroupLayout.DEFAULT_SIZE, 196, Short.MAX_VALUE)
-                                    .addComponent(txtFirstName, javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(txtEmail, javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(txtPhoneNumber, javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(jLabel7, javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(jLabel5, javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(jLabel3, javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addGroup(javax.swing.GroupLayout.Alignment.LEADING, jPanel1Layout.createSequentialGroup()
-                                        .addGap(44, 44, 44)
-                                        .addComponent(jCheckBox1)
-                                        .addGap(18, 18, 18)
-                                        .addComponent(jCheckBox2)))
-                                .addGap(0, 0, Short.MAX_VALUE))
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                                    .addGroup(jPanel1Layout.createSequentialGroup()
+                                        .addComponent(jLabel12)
+                                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                            .addComponent(jLabel8)
+                                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                                .addComponent(txtLastName, javax.swing.GroupLayout.DEFAULT_SIZE, 205, Short.MAX_VALUE)
+                                                .addComponent(dateChooserDOB, javax.swing.GroupLayout.DEFAULT_SIZE, 205, Short.MAX_VALUE)
+                                                .addComponent(txtIDNumber)
+                                                .addComponent(txtUsername))
+                                            .addComponent(jLabel4)
+                                            .addComponent(jLabel9)
+                                            .addComponent(jLabel11)
+                                            .addComponent(lblLastNameError)
+                                            .addComponent(lblDOBError)
+                                            .addComponent(lblIDError)
+                                            .addComponent(lblUsernameError)
+                                            .addComponent(jLabel21)))
+                                    .addGroup(jPanel1Layout.createSequentialGroup()
+                                        .addGap(0, 0, Short.MAX_VALUE)
+                                        .addComponent(jLabel2)
+                                        .addGap(146, 146, 146)))
+                                .addGap(28, 28, 28))
                             .addGroup(jPanel1Layout.createSequentialGroup()
                                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                                    .addComponent(jLabel11)
-                                    .addComponent(jLabel10))
-                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 167, Short.MAX_VALUE)))
-                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                            .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                                .addComponent(jLabel9)
-                                .addComponent(jLabel8)
-                                .addComponent(txtLastName, javax.swing.GroupLayout.DEFAULT_SIZE, 205, Short.MAX_VALUE)
-                                .addComponent(jLabel4)
-                                .addComponent(DateChooser, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
-                                .addComponent(txtIDNumber)
-                                .addComponent(txtPassword))
-                            .addComponent(jLabel12))
-                        .addGap(34, 34, 34))
-                    .addGroup(jPanel1Layout.createSequentialGroup()
-                        .addGap(95, 95, 95)
+                                    .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
+                                        .addComponent(txtFirstName, javax.swing.GroupLayout.DEFAULT_SIZE, 196, Short.MAX_VALUE)
+                                        .addComponent(txtEmail)
+                                        .addComponent(txtPhoneNumber)
+                                        .addComponent(jLabel7)
+                                        .addComponent(jLabel5)
+                                        .addComponent(jLabel3)
+                                        .addComponent(cmbGender, 0, 196, Short.MAX_VALUE)
+                                        .addComponent(jLabel10)
+                                        .addComponent(lblFirstNameError)
+                                        .addComponent(lblEmailError)
+                                        .addComponent(lblPhoneError)
+                                        .addComponent(lbl)
+                                        .addComponent(txtPassword))
+                                    .addComponent(lblPasswordError))
+                                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                                    .addGroup(jPanel1Layout.createSequentialGroup()
+                                        .addComponent(lblConfirmError)
+                                        .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                                    .addGroup(jPanel1Layout.createSequentialGroup()
+                                        .addComponent(txtConfirmPassword)
+                                        .addGap(45, 45, 45))))))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 87, Short.MAX_VALUE)
                         .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 294, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addContainerGap(102, Short.MAX_VALUE))))
+                        .addGap(83, 83, 83))
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGap(201, 201, 201)
+                        .addComponent(lblStatus)
+                        .addContainerGap())))
         );
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-            .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, 0, Short.MAX_VALUE)
+            .addComponent(jPanel2, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
             .addGroup(jPanel1Layout.createSequentialGroup()
-                .addGap(15, 15, 15)
+                .addGap(19, 19, 19)
                 .addComponent(jLabel2)
-                .addGap(46, 46, 46)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jLabel4)
-                    .addComponent(jLabel3))
+                .addGap(18, 18, 18)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel3)
+                            .addComponent(jLabel4))
+                        .addGap(8, 8, 8)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(txtFirstName, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(txtLastName, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(lblFirstNameError)
+                            .addComponent(lblLastNameError))
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                            .addComponent(jLabel5)
+                            .addComponent(jLabel8))
+                        .addGap(9, 9, 9)
+                        .addComponent(txtEmail, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE))
+                    .addComponent(dateChooserDOB, javax.swing.GroupLayout.PREFERRED_SIZE, 40, javax.swing.GroupLayout.PREFERRED_SIZE))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(txtFirstName, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(txtLastName, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(32, 32, 32)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jLabel5)
-                    .addComponent(jLabel8))
+                    .addComponent(lblEmailError)
+                    .addComponent(lblDOBError))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING, false)
-                    .addComponent(DateChooser, javax.swing.GroupLayout.DEFAULT_SIZE, 40, Short.MAX_VALUE)
-                    .addComponent(txtEmail))
-                .addGap(37, 37, 37)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(jLabel7)
                     .addComponent(jLabel9))
@@ -210,23 +464,38 @@ public class RegisteR extends javax.swing.JFrame {
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
                     .addComponent(txtPhoneNumber, javax.swing.GroupLayout.PREFERRED_SIZE, 36, javax.swing.GroupLayout.PREFERRED_SIZE)
                     .addComponent(txtIDNumber, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(27, 27, 27)
-                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(jLabel12, javax.swing.GroupLayout.Alignment.TRAILING)
+                .addGap(1, 1, 1)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(lblPhoneError)
+                    .addComponent(lblIDError))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel10)
                     .addComponent(jLabel11))
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(txtUsername, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(txtPassword, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE))
-                .addGap(18, 18, 18)
-                .addComponent(jLabel10)
-                .addGap(4, 4, 4)
+                    .addComponent(cmbGender, javax.swing.GroupLayout.PREFERRED_SIZE, 37, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(txtUsername, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
-                    .addComponent(jCheckBox1)
-                    .addComponent(jCheckBox2))
-                .addGap(18, 18, 18)
+                    .addComponent(lbl)
+                    .addComponent(lblUsernameError))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel12)
+                    .addComponent(jLabel21))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(txtPassword, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(txtConfirmPassword, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(lblPasswordError)
+                    .addComponent(lblConfirmError))
+                .addGap(29, 29, 29)
                 .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 38, javax.swing.GroupLayout.PREFERRED_SIZE)
-                .addContainerGap(45, Short.MAX_VALUE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addComponent(lblStatus))
         );
 
         javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
@@ -252,13 +521,9 @@ public class RegisteR extends javax.swing.JFrame {
         // TODO add your handling code here:
     }//GEN-LAST:event_txtUsernameActionPerformed
 
-    private void jCheckBox2ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jCheckBox2ActionPerformed
-        // TODO add your handling code here:
-    }//GEN-LAST:event_jCheckBox2ActionPerformed
-
     private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
         // TODO add your handling code here:
-        
+        registerUser();
     }//GEN-LAST:event_jButton1ActionPerformed
 
     /**
@@ -297,15 +562,15 @@ public class RegisteR extends javax.swing.JFrame {
     }
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
-    private com.toedter.calendar.JDateChooser DateChooser;
+    private javax.swing.JComboBox<String> cmbGender;
+    private com.toedter.calendar.JDateChooser dateChooserDOB;
     private javax.swing.JButton jButton1;
-    private javax.swing.JCheckBox jCheckBox1;
-    private javax.swing.JCheckBox jCheckBox2;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel10;
     private javax.swing.JLabel jLabel11;
     private javax.swing.JLabel jLabel12;
     private javax.swing.JLabel jLabel2;
+    private javax.swing.JLabel jLabel21;
     private javax.swing.JLabel jLabel3;
     private javax.swing.JLabel jLabel4;
     private javax.swing.JLabel jLabel5;
@@ -314,6 +579,18 @@ public class RegisteR extends javax.swing.JFrame {
     private javax.swing.JLabel jLabel9;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
+    private javax.swing.JLabel lbl;
+    private javax.swing.JLabel lblConfirmError;
+    private javax.swing.JLabel lblDOBError;
+    private javax.swing.JLabel lblEmailError;
+    private javax.swing.JLabel lblFirstNameError;
+    private javax.swing.JLabel lblIDError;
+    private javax.swing.JLabel lblLastNameError;
+    private javax.swing.JLabel lblPasswordError;
+    private javax.swing.JLabel lblPhoneError;
+    private javax.swing.JLabel lblStatus;
+    private javax.swing.JLabel lblUsernameError;
+    private javax.swing.JTextField txtConfirmPassword;
     private javax.swing.JTextField txtEmail;
     private javax.swing.JTextField txtFirstName;
     private javax.swing.JTextField txtIDNumber;
