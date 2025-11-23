@@ -154,14 +154,14 @@ public class History extends javax.swing.JFrame {
 
             },
             new String [] {
-                "Date", "Time", "Diagnosis", "Doctor_ID", "Service Fee"
+                "Date", "Time", "Doctor", "Diagnosis", "Notes", "Prescription", "Service Fee"
             }
         ) {
             Class[] types = new Class [] {
-                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class
+                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class
             };
             boolean[] canEdit = new boolean [] {
-                false, false, false, false, false
+                false, false, false, false, false, true, true
             };
 
             public Class getColumnClass(int columnIndex) {

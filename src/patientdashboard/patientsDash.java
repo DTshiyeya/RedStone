@@ -779,7 +779,9 @@ public class patientsDash extends javax.swing.JFrame {
 
     private void NavBtnBookAppointmentActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBookAppointmentActionPerformed
         // TODO add your handling code here:
-        
+        BookAppointment book = new BookAppointment(patientId, username);
+        book.setVisible(true);
+
     }//GEN-LAST:event_NavBtnBookAppointmentActionPerformed
 
     private void NavBtnCancelAppointmentActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnCancelAppointmentActionPerformed
@@ -789,6 +791,8 @@ public class patientsDash extends javax.swing.JFrame {
 
     private void NavBtnEditProfileActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnEditProfileActionPerformed
         // TODO add your handling code here:
+        Edit edit = new Edit(patientId, username);
+        edit.setVisible(true);
         
     }//GEN-LAST:event_NavBtnEditProfileActionPerformed
 

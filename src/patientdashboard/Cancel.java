@@ -4,6 +4,13 @@
  */
 package patientdashboard;
 
+import util.DatabaseConnection;
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.sql.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+
 /**
  *
  * @author bompe
@@ -17,13 +24,177 @@ public class Cancel extends javax.swing.JFrame {
      */
     public Cancel(int patientId, String username) {
         initComponents();
+        
         this.patientId = patientId;
         this.username = username;
+        loadAppointments();
+        applyStatusColorRenderer();
+        setupButtons();
         
-        
+        tblAppointments.getColumnModel().getColumn(0).setMinWidth(0);
+        tblAppointments.getColumnModel().getColumn(0).setMaxWidth(0);
     }
     
+    private void setupButtons() {
+        btnCancel.addActionListener(e -> cancelAppointment());
+
+        btnDashboard.addActionListener(e -> {
+            patientsDash dash = new patientsDash(patientId, username);
+            dash.setVisible(true);
+            this.dispose();
+        });
+
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                patientsDash dash = new patientsDash(patientId, username);
+                dash.setVisible(true);
+            }
+        });
+    }
     
+    private void applyStatusColorRenderer() {
+        tblAppointments.setDefaultRenderer(Object.class, new javax.swing.table.DefaultTableCellRenderer() {
+
+            @Override
+            public java.awt.Component getTableCellRendererComponent(
+                    JTable table, Object value, boolean isSelected,
+                    boolean hasFocus, int row, int column) {
+
+                java.awt.Component c = super.getTableCellRendererComponent(
+                        table, value, isSelected, hasFocus, row, column);
+
+                String status = table.getValueAt(row, 3).toString().toUpperCase();
+
+                // default colors
+                c.setForeground(java.awt.Color.BLACK);
+                c.setBackground(java.awt.Color.WHITE);
+
+                switch (status) {
+                    case "SCHEDULED" -> c.setBackground(new java.awt.Color(200, 255, 200)); // green
+                    case "CANCELLED" -> c.setBackground(new java.awt.Color(255, 200, 200)); // red
+                    case "PAST" -> c.setBackground(new java.awt.Color(230, 230, 230)); // gray
+                }
+
+                if (isSelected) {
+                    c.setBackground(new java.awt.Color(100, 150, 255)); // highlight on select
+                }
+
+                return c;
+            }
+        });
+    }
+
+
+    /** -----------------------------
+     * LOAD ALL APPOINTMENTS
+     * ----------------------------- */
+    private void loadAppointments() {
+        DefaultTableModel model = (DefaultTableModel) tblAppointments.getModel();
+        model.setRowCount(0);
+
+        try (Connection conn = DatabaseConnection.getConnection()) {
+
+            String filter = cmbFilter.getSelectedItem().toString();
+            String sql = """
+                SELECT a.appointmentId, a.appointmentDate, a.reason, 
+                       d.fullName AS doctorName, a.status 
+                FROM appointments a
+                JOIN doctors d ON a.doctorId = d.doctorId
+                WHERE a.patientId = ?
+                ORDER BY a.appointmentDate DESC
+            """;
+
+            PreparedStatement pst = conn.prepareStatement(sql);
+            pst.setInt(1, patientId);
+            ResultSet rs = pst.executeQuery();
+
+            java.sql.Date today = new java.sql.Date(System.currentTimeMillis());
+
+            while (rs.next()) {
+                String status = rs.getString("status");
+                Date appDate = rs.getDate("appointmentDate");
+
+                // Determine Past / Upcoming automatically if not cancelled
+                String computedStatus = status;
+                if (!status.equalsIgnoreCase("Cancelled")) {
+                    if (appDate.before(today)) {
+                        computedStatus = "Past";
+                    } else {
+                        computedStatus = "Scheduled";
+                    }
+                }
+
+                // FILTERING LOGIC
+                boolean addRow = switch (filter) {
+                    case "All" -> true;
+                    case "Upcoming" -> computedStatus.equals("Scheduled");
+                    case "Past" -> computedStatus.equals("Past");
+                    case "Cancelled" -> computedStatus.equals("Cancelled");
+                    default -> true;
+                };
+
+                if (addRow) {
+                    model.addRow(new Object[]{
+                            rs.getDate("appointmentDate"),
+                            rs.getString("reason"),
+                            rs.getString("doctorName"),
+                            computedStatus
+                    });
+                }
+            }
+
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Error loading appointments: " + e.getMessage());
+        }
+    }
+
+
+    /** -----------------------------
+     * CANCEL APPOINTMENT
+     * ----------------------------- */
+    private void cancelAppointment() {
+        int row = tblAppointments.getSelectedRow();
+
+        if (row == -1) {
+            JOptionPane.showMessageDialog(this,
+                    "Please select an appointment to cancel.");
+            return;
+        }
+
+        int appointmentId = (int) tblAppointments.getValueAt(row, 0);
+        String status = tblAppointments.getValueAt(row, 4).toString();
+
+        if (status.equalsIgnoreCase("CANCELLED")) {
+            JOptionPane.showMessageDialog(this,
+                    "This appointment is already cancelled.");
+            return;
+        }
+
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to cancel this appointment?",
+                "Confirm Cancel",
+                JOptionPane.YES_NO_OPTION);
+
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        String sql = "UPDATE appointments SET status='CANCELLED' WHERE appointmentId=?";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement pst = conn.prepareStatement(sql)) {
+
+            pst.setInt(1, appointmentId);
+            pst.executeUpdate();
+
+            JOptionPane.showMessageDialog(this, "Appointment cancelled.");
+            loadAppointments(); // refresh table
+
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Error cancelling appointment: " + ex.getMessage());
+        }
+    }
+
 
     /**
      * This method is called from within the constructor to initialize the form.
@@ -38,15 +209,16 @@ public class Cancel extends javax.swing.JFrame {
         jPanel1 = new javax.swing.JPanel();
         jPanel2 = new javax.swing.JPanel();
         jLabel8 = new javax.swing.JLabel();
-        NavBtnBack2Dash = new javax.swing.JButton();
+        btnDashboard = new javax.swing.JButton();
         NavBtnBookAppointment = new javax.swing.JButton();
         NavBtnEditProfile = new javax.swing.JButton();
         NavBtnMedicalHistory1 = new javax.swing.JButton();
         jButton7 = new javax.swing.JButton();
         jLabel6 = new javax.swing.JLabel();
-        jButton1 = new javax.swing.JButton();
+        btnCancel = new javax.swing.JButton();
         jScrollPane2 = new javax.swing.JScrollPane();
-        jTable2 = new javax.swing.JTable();
+        tblAppointments = new javax.swing.JTable();
+        cmbFilter = new javax.swing.JComboBox<>();
 
         NavBtnMedicalHistory.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
         NavBtnMedicalHistory.setForeground(new java.awt.Color(255, 255, 255));
@@ -72,16 +244,16 @@ public class Cancel extends javax.swing.JFrame {
         jLabel8.setIcon(new javax.swing.ImageIcon(getClass().getResource("/images/2.png"))); // NOI18N
         jLabel8.setText("Redstone Health Center");
 
-        NavBtnBack2Dash.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
-        NavBtnBack2Dash.setForeground(new java.awt.Color(255, 255, 255));
-        NavBtnBack2Dash.setText("Dash board");
-        NavBtnBack2Dash.setBorder(null);
-        NavBtnBack2Dash.setBorderPainted(false);
-        NavBtnBack2Dash.setContentAreaFilled(false);
-        NavBtnBack2Dash.setDefaultCapable(false);
-        NavBtnBack2Dash.addActionListener(new java.awt.event.ActionListener() {
+        btnDashboard.setFont(new java.awt.Font("Segoe UI", 1, 12)); // NOI18N
+        btnDashboard.setForeground(new java.awt.Color(255, 255, 255));
+        btnDashboard.setText("Dash board");
+        btnDashboard.setBorder(null);
+        btnDashboard.setBorderPainted(false);
+        btnDashboard.setContentAreaFilled(false);
+        btnDashboard.setDefaultCapable(false);
+        btnDashboard.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                NavBtnBack2DashActionPerformed(evt);
+                btnDashboardActionPerformed(evt);
             }
         });
 
@@ -142,7 +314,7 @@ public class Cancel extends javax.swing.JFrame {
                     .addComponent(jButton7)
                     .addComponent(NavBtnMedicalHistory1)
                     .addComponent(NavBtnEditProfile)
-                    .addComponent(NavBtnBack2Dash)
+                    .addComponent(btnDashboard)
                     .addComponent(NavBtnBookAppointment))
                 .addGap(0, 0, Short.MAX_VALUE))
         );
@@ -152,7 +324,7 @@ public class Cancel extends javax.swing.JFrame {
                 .addContainerGap()
                 .addComponent(jLabel8)
                 .addGap(80, 80, 80)
-                .addComponent(NavBtnBack2Dash)
+                .addComponent(btnDashboard)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
                 .addComponent(NavBtnBookAppointment)
                 .addGap(18, 18, 18)
@@ -167,45 +339,45 @@ public class Cancel extends javax.swing.JFrame {
         jLabel6.setFont(new java.awt.Font("Segoe UI", 0, 18)); // NOI18N
         jLabel6.setText("Cancel Appointments");
 
-        jButton1.setBackground(new java.awt.Color(0, 153, 0));
-        jButton1.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
-        jButton1.setForeground(new java.awt.Color(255, 255, 255));
-        jButton1.setText("Cancel");
-        jButton1.setBorder(null);
-        jButton1.setBorderPainted(false);
-        jButton1.addActionListener(new java.awt.event.ActionListener() {
+        btnCancel.setBackground(new java.awt.Color(0, 153, 0));
+        btnCancel.setFont(new java.awt.Font("Segoe UI", 1, 14)); // NOI18N
+        btnCancel.setForeground(new java.awt.Color(255, 255, 255));
+        btnCancel.setText("Cancel");
+        btnCancel.setBorder(null);
+        btnCancel.setBorderPainted(false);
+        btnCancel.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent evt) {
-                jButton1ActionPerformed(evt);
+                btnCancelActionPerformed(evt);
             }
         });
 
-        jTable2.setBackground(new java.awt.Color(0, 102, 102));
-        jTable2.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
-        jTable2.setForeground(new java.awt.Color(255, 255, 255));
-        jTable2.setModel(new javax.swing.table.DefaultTableModel(
+        tblAppointments.setBackground(new java.awt.Color(0, 102, 102));
+        tblAppointments.setFont(new java.awt.Font("Segoe UI", 0, 14)); // NOI18N
+        tblAppointments.setForeground(new java.awt.Color(255, 255, 255));
+        tblAppointments.setModel(new javax.swing.table.DefaultTableModel(
             new Object [][] {
 
             },
             new String [] {
-                "Appointment Date", "Reason", "Doctor", "Status"
+                "Appointment ID", "Appointment Date", "Doctor", "Reason", "Status"
             }
         ) {
-            Class[] types = new Class [] {
-                java.lang.String.class, java.lang.String.class, java.lang.String.class, java.lang.String.class
-            };
             boolean[] canEdit = new boolean [] {
-                false, false, false, false
+                false, false, false, false, false
             };
-
-            public Class getColumnClass(int columnIndex) {
-                return types [columnIndex];
-            }
 
             public boolean isCellEditable(int rowIndex, int columnIndex) {
                 return canEdit [columnIndex];
             }
         });
-        jScrollPane2.setViewportView(jTable2);
+        jScrollPane2.setViewportView(tblAppointments);
+
+        cmbFilter.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "All", "Upcoming", "Past", "Cancelled" }));
+        cmbFilter.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                cmbFilterActionPerformed(evt);
+            }
+        });
 
         javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
         jPanel1.setLayout(jPanel1Layout);
@@ -214,10 +386,6 @@ public class Cancel extends javax.swing.JFrame {
             .addGroup(jPanel1Layout.createSequentialGroup()
                 .addComponent(jPanel2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
-                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 49, Short.MAX_VALUE)
-                        .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 754, javax.swing.GroupLayout.PREFERRED_SIZE)
-                        .addGap(30, 30, 30))
                     .addGroup(jPanel1Layout.createSequentialGroup()
                         .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
                             .addGroup(jPanel1Layout.createSequentialGroup()
@@ -225,8 +393,14 @@ public class Cancel extends javax.swing.JFrame {
                                 .addComponent(jLabel6))
                             .addGroup(jPanel1Layout.createSequentialGroup()
                                 .addGap(229, 229, 229)
-                                .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 361, javax.swing.GroupLayout.PREFERRED_SIZE)))
-                        .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))))
+                                .addComponent(btnCancel, javax.swing.GroupLayout.PREFERRED_SIZE, 361, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                        .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE))
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, 49, Short.MAX_VALUE)
+                        .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                            .addComponent(cmbFilter, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                            .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 754, javax.swing.GroupLayout.PREFERRED_SIZE))
+                        .addGap(30, 30, 30))))
         );
         jPanel1Layout.setVerticalGroup(
             jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
@@ -234,10 +408,12 @@ public class Cancel extends javax.swing.JFrame {
             .addGroup(jPanel1Layout.createSequentialGroup()
                 .addGap(16, 16, 16)
                 .addComponent(jLabel6)
-                .addGap(59, 59, 59)
+                .addGap(19, 19, 19)
+                .addComponent(cmbFilter, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addGap(18, 18, 18)
                 .addComponent(jScrollPane2, javax.swing.GroupLayout.PREFERRED_SIZE, 270, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addGap(65, 65, 65)
-                .addComponent(jButton1, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addComponent(btnCancel, javax.swing.GroupLayout.PREFERRED_SIZE, 39, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addContainerGap(146, Short.MAX_VALUE))
         );
 
@@ -258,15 +434,15 @@ public class Cancel extends javax.swing.JFrame {
         setLocationRelativeTo(null);
     }// </editor-fold>//GEN-END:initComponents
 
-    private void jButton1ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
+    private void btnCancelActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnCancelActionPerformed
         // TODO add your handling code here:
-    }//GEN-LAST:event_jButton1ActionPerformed
+    }//GEN-LAST:event_btnCancelActionPerformed
 
-    private void NavBtnBack2DashActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBack2DashActionPerformed
+    private void btnDashboardActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnDashboardActionPerformed
         // TODO add your handling code here:
         new patientsDash(patientId, username).setVisible(true);
         dispose();
-    }//GEN-LAST:event_NavBtnBack2DashActionPerformed
+    }//GEN-LAST:event_btnDashboardActionPerformed
 
     private void NavBtnBookAppointmentActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBookAppointmentActionPerformed
         // TODO add your handling code here:
@@ -288,54 +464,30 @@ public class Cancel extends javax.swing.JFrame {
 
     }//GEN-LAST:event_NavBtnMedicalHistory1ActionPerformed
 
+    private void cmbFilterActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_cmbFilterActionPerformed
+        // TODO add your handling code here:
+        loadAppointments();
+    }//GEN-LAST:event_cmbFilterActionPerformed
+
     /**
      * @param args the command line arguments
      */
-    public static void main(String args[]) {
-        /* Set the Nimbus look and feel */
-        //<editor-fold defaultstate="collapsed" desc=" Look and feel setting code (optional) ">
-        /* If Nimbus (introduced in Java SE 6) is not available, stay with the default look and feel.
-         * For details see http://download.oracle.com/javase/tutorial/uiswing/lookandfeel/plaf.html 
-         */
-        try {
-            for (javax.swing.UIManager.LookAndFeelInfo info : javax.swing.UIManager.getInstalledLookAndFeels()) {
-                if ("Nimbus".equals(info.getName())) {
-                    javax.swing.UIManager.setLookAndFeel(info.getClassName());
-                    break;
-                }
-            }
-        } catch (ClassNotFoundException ex) {
-            java.util.logging.Logger.getLogger(Cancel.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (InstantiationException ex) {
-            java.util.logging.Logger.getLogger(Cancel.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (IllegalAccessException ex) {
-            java.util.logging.Logger.getLogger(Cancel.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        } catch (javax.swing.UnsupportedLookAndFeelException ex) {
-            java.util.logging.Logger.getLogger(Cancel.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
-        }
-        //</editor-fold>
-
-        /* Create and display the form */
-        java.awt.EventQueue.invokeLater(new Runnable() {
-            public void run() {
-                new Cancel().setVisible(true);
-            }
-        });
-    }
+   
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
-    private javax.swing.JButton NavBtnBack2Dash;
     private javax.swing.JButton NavBtnBookAppointment;
     private javax.swing.JButton NavBtnEditProfile;
     private javax.swing.JButton NavBtnMedicalHistory;
     private javax.swing.JButton NavBtnMedicalHistory1;
-    private javax.swing.JButton jButton1;
+    private javax.swing.JButton btnCancel;
+    private javax.swing.JButton btnDashboard;
+    private javax.swing.JComboBox<String> cmbFilter;
     private javax.swing.JButton jButton7;
     private javax.swing.JLabel jLabel6;
     private javax.swing.JLabel jLabel8;
     private javax.swing.JPanel jPanel1;
     private javax.swing.JPanel jPanel2;
     private javax.swing.JScrollPane jScrollPane2;
-    private javax.swing.JTable jTable2;
+    private javax.swing.JTable tblAppointments;
     // End of variables declaration//GEN-END:variables
 }
