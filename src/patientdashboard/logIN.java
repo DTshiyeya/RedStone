@@ -366,6 +366,8 @@ public class logIN extends javax.swing.JFrame {
 
     private void BtnCreateAccountActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_BtnCreateAccountActionPerformed
         // TODO add your handling code here:
+        new RegisteR().setVisible(true);
+        dispose();
     }//GEN-LAST:event_BtnCreateAccountActionPerformed
 
     private void BtnSignUpMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_BtnSignUpMouseClicked
