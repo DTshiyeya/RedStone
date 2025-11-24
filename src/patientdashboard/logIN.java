@@ -362,6 +362,7 @@ public class logIN extends javax.swing.JFrame {
         } catch (Exception e) {
             lblStatus.setText("Database Error: " + e.getMessage());
         }
+    
     }//GEN-LAST:event_btnLoginActionPerformed
 
     private void BtnCreateAccountActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_BtnCreateAccountActionPerformed
