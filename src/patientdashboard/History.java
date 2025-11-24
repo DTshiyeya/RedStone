@@ -218,7 +218,7 @@ public class History extends javax.swing.JFrame {
 
     private void NavBtnBack2DashActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_NavBtnBack2DashActionPerformed
         // TODO add your handling code here:
-        new patientsDash().setVisible(true);
+        
         dispose();
     }//GEN-LAST:event_NavBtnBack2DashActionPerformed
 
