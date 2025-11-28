@@ -363,7 +363,7 @@ public class logIN extends javax.swing.JFrame {
                 }
                 
                 else if (role.equals("Admin")) {
-                    int doctorId = rs.getInt(1);
+                    int adminId = rs.getInt(1);
                     String user = rs.getString("username");
 
                     AdminDash a = new AdminDash(adminId);
